@@ -1,0 +1,1171 @@
+---
+title: "PLSC Analysis: Hippocampus & Amygdala Role in Socioenvironmental Factors and Adolescent Depression"
+author: "Chloe Hampson"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fontsize: 9pt
+    theme: united
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_depth: 6
+---
+
+# Overview
+
+**Research Question:** What role do the hippocampus and amygdala play in the association between socioenvironmental factors and adolescent depression?
+
+**Analysis Approach:** Two-stage analysis
+
+## Stage 1: PLSC - Socioenvironmental Factors ↔ Depression Symptoms
+- **Block 1 (X matrix):** Socioenvironmental factors (family environment, cultural/social, SES)
+- **Block 2 (Y matrix):** Depression symptoms (CBCL, YSR, KSADS)
+- Identifies latent dimensions linking specific socioenvironmental patterns to depression patterns
+
+## Stage 2: Brain-Behavior Analysis
+- Correlate PLSC latent variable scores with hippocampus/amygdala activation
+- Determines whether brain function mediates/moderates the socio-depression association
+- Can also run secondary PLSC: Brain ↔ PLSC latent scores
+
+---
+
+## Import Libraries
+
+```{r setup, message=FALSE, warning=FALSE}
+rm(list = ls()) # Clear environment
+graphics.off() # Clear all plots
+
+# Load necessary libraries
+library(tidyverse)       # Core tidyverse packages
+library(ExPosition)      # Multivariate data analysis
+library(TExPosition)     # Tensor-based ExPosition analysis
+library(PTCA4CATA)       # Permutation Tests for CATA
+library(data4PCCAR)      # Example datasets for PCA
+library(plyr)            # Data manipulation (load first to avoid conflicts)
+library(dplyr)           # Data manipulation
+library(corrplot)        # Correlation plots
+library(ggplot2)         # Data visualization
+library(cowplot)         # Plot arrangement
+library(readr)           # Reading data files
+library(gridExtra)       # Arrange grid-based visualizations
+library(grid)            # Low-level graphics system
+library(here)            # Relative file paths
+library(psych)           # Psychometric tools
+library(car)             # Companion to Applied Regression
+library(kableExtra)      # Table formatting
+library(RColorBrewer)    # Color palettes
+```
+
+---
+
+## Load Data
+
+**Data prepared using `data_preparation.ipynb`**
+
+Four dataframes:
+1. `covariate.csv` - Covariates for residualization
+2. `clean-socioenv.csv` - Socioenvironmental variables (Block 1 for PLSC)
+3. `clean-depression.csv` - Depression symptoms (Block 2 for PLSC)
+4. `clean-brain-hippo-amyg.csv` - Hippocampus & Amygdala activation (for Stage 2)
+
+```{r load_data, message=FALSE}
+# Set paths - UPDATE THESE TO YOUR DATA LOCATION
+data_dir <- "/Users/chloehampson/Desktop/hippo-amyg-depression/derivatives"
+fig_dir <- file.path(data_dir, "figures")
+out_dir <- data_dir
+
+# Create figures directory if it doesn't exist
+if (!dir.exists(fig_dir)) {
+  dir.create(fig_dir, recursive = TRUE)
+}
+
+# Load datasets
+covar_df <- read_csv(file.path(data_dir, "covariate.csv"))
+socioenv_df <- read_csv(file.path(data_dir, "clean-socioenv.csv"))
+depression_df <- read_csv(file.path(data_dir, "clean-depression.csv"))
+brain_df <- read_csv(file.path(data_dir, "clean-brain-hippo-amyg.csv"))
+
+# Display data dimensions
+cat("Data dimensions:\n")
+cat("  Covariates:", dim(covar_df), "\n")
+cat("  Socioenvironmental (Block 1):", dim(socioenv_df), "\n")
+cat("  Depression (Block 2):", dim(depression_df), "\n")
+cat("  Brain - Hippo/Amyg (Stage 2):", dim(brain_df), "\n")
+```
+
+```{r check_data}
+# Preview data structure
+cat("\n=== Covariate Variables ===\n")
+print(names(covar_df))
+
+cat("\n=== Socioenvironmental Variables (Block 1) ===\n")
+print(names(socioenv_df))
+
+cat("\n=== Depression Variables (Block 2) ===\n")
+print(names(depression_df))
+
+cat("\n=== Brain Variables - Hippocampus & Amygdala (Stage 2) ===\n")
+print(names(brain_df))
+```
+
+---
+
+# STAGE 1: PLSC - Socioenvironmental Factors ↔ Depression
+
+## Residualization
+
+Remove variance associated with nuisance covariates from both data blocks using multiple linear regression.
+
+### Covariate Summary
+
+```{r covariate_summary}
+# Display covariate summary
+cat("Covariate Summary:\n")
+summary(covar_df)
+```
+
+### Define Covariates for Regression
+
+```{r define_covariates}
+# Extract subject IDs (assuming first column is subject ID)
+subject_ids <- covar_df[[1]]
+
+# Remove subject ID column for regression
+covar_matrix <- covar_df[, -1]
+
+# View covariate structure
+str(covar_matrix)
+```
+
+### MLRM for Socioenvironmental Data (Block 1)
+
+```{r residualize_block1, message=FALSE, warning=FALSE}
+# Prepare dependent variables (Socioenvironmental factors)
+# Remove subject ID column if present
+if ("src_subject_id" %in% names(socioenv_df)) {
+  Group1.Y <- as.matrix(socioenv_df[, -which(names(socioenv_df) == "src_subject_id")])
+} else {
+  Group1.Y <- as.matrix(socioenv_df[, -1])  # Assume first col is ID
+}
+
+# Independent variables (covariates)
+Group1.X <- covar_matrix
+
+cat("Block 1 (Socioenvironmental) dimensions:", dim(Group1.Y), "\n")
+cat("Covariate matrix dimensions:", dim(Group1.X), "\n")
+```
+
+```{r mlrm_block1, warning=FALSE}
+# Build regression formula dynamically based on available covariates
+# Common covariates: age, sex, site, motion, family ID
+
+# Multiple regression model for Block 1
+# NOTE: Adjust formula based on your actual covariate column names
+lm.Group1 <- lm(Group1.Y ~ ., data = Group1.X, na.action = na.omit)
+
+# Extract residuals
+Group1_residuals <- as.data.frame(lm.Group1$residuals)
+rownames(Group1_residuals) <- rownames(Group1.Y)
+
+cat("\nResiduals extracted for Block 1 (Socioenvironmental)\n")
+cat("Residual dimensions:", dim(Group1_residuals), "\n")
+```
+
+### MLRM for Depression Data (Block 2)
+
+```{r residualize_block2, message=FALSE, warning=FALSE}
+# Prepare dependent variables (Depression symptoms)
+if ("src_subject_id" %in% names(depression_df)) {
+  Group2.Y <- as.matrix(depression_df[, -which(names(depression_df) == "src_subject_id")])
+} else {
+  Group2.Y <- as.matrix(depression_df[, -1])  # Assume first col is ID
+}
+
+cat("Block 2 (Depression) dimensions:", dim(Group2.Y), "\n")
+```
+
+```{r mlrm_block2, warning=FALSE}
+# Multiple regression model for Block 2
+lm.Group2 <- lm(Group2.Y ~ ., data = Group1.X, na.action = na.omit)
+
+# Extract residuals
+Group2_residuals <- as.data.frame(lm.Group2$residuals)
+rownames(Group2_residuals) <- rownames(Group2.Y)
+
+cat("\nResiduals extracted for Block 2 (Depression)\n")
+cat("Residual dimensions:", dim(Group2_residuals), "\n")
+```
+
+### MLRM for Brain Data (for Stage 2)
+
+```{r residualize_brain, message=FALSE, warning=FALSE}
+# Prepare dependent variables (Hippocampus & Amygdala)
+if ("src_subject_id" %in% names(brain_df)) {
+  Brain.Y <- as.matrix(brain_df[, -which(names(brain_df) == "src_subject_id")])
+} else {
+  Brain.Y <- as.matrix(brain_df[, -1])  # Assume first col is ID
+}
+
+cat("Brain (Hippo/Amyg) dimensions:", dim(Brain.Y), "\n")
+
+# Multiple regression model for Brain
+lm.Brain <- lm(Brain.Y ~ ., data = Group1.X, na.action = na.omit)
+
+# Extract residuals
+Brain_residuals <- as.data.frame(lm.Brain$residuals)
+rownames(Brain_residuals) <- rownames(Brain.Y)
+
+cat("\nResiduals extracted for Brain data\n")
+cat("Residual dimensions:", dim(Brain_residuals), "\n")
+```
+
+---
+
+## PLSC Analysis: Socioenvironmental ↔ Depression
+
+### 1. Correlation Matrix
+
+Examine the correlation structure between socioenvironmental factors and depression symptoms.
+
+```{r correlation_plot, fig.width=14, fig.height=10}
+# Input data for PLSC
+data1 <- as.data.frame(Group1_residuals)  # Socioenvironmental (X)
+data2 <- as.data.frame(Group2_residuals)  # Depression (Y)
+
+# Compute correlation matrix
+XY.cor.pearson <- cor(data1, data2)
+
+# Save the correlation plot
+corr_file <- file.path(fig_dir, "correlation_matrix_socioenv_vs_depression.png")
+
+# Create correlation plot
+png(corr_file, width = 1600, height = 1200, res = 150)
+
+corrplot(XY.cor.pearson,
+  is.corr = TRUE,
+  method = "color",
+  tl.cex = 0.6, 
+  tl.col = "black",
+  cl.pos = "b", 
+  cl.cex = 0.6,
+  title = "Correlation: Socioenvironmental Factors vs Depression Symptoms",
+  cex.main = 0.9,
+  mar = c(0, 0, 2, 0),
+  col = colorRampPalette(c("darkred", "white", "midnightblue"))(100)
+)
+
+dev.off()
+cat("Correlation plot saved to:", corr_file, "\n")
+
+# Display in document
+corrplot(XY.cor.pearson,
+  is.corr = TRUE,
+  method = "color",
+  tl.cex = 0.6, 
+  tl.col = "black",
+  cl.pos = "b", 
+  cl.cex = 0.6,
+  title = "Correlation: Socioenvironmental Factors vs Depression Symptoms",
+  cex.main = 0.9,
+  mar = c(0, 0, 2, 0),
+  col = colorRampPalette(c("darkred", "white", "midnightblue"))(100)
+)
+```
+
+### 2. Run PLSC
+
+```{r run_plsc}
+# Extract design variable (site) for group visualization
+if ("ab_g_dyn__design_site" %in% names(covar_df)) {
+  data.design <- as.factor(covar_df$ab_g_dyn__design_site)
+} else if ("site_id_l" %in% names(covar_df)) {
+  data.design <- as.factor(covar_df$site_id_l)
+} else if ("site" %in% names(covar_df)) {
+  data.design <- as.factor(covar_df$site)
+} else {
+  # No site variable - create dummy design
+  data.design <- as.factor(rep("All", nrow(data1)))
+}
+
+# Convert to matrix for PLSC input
+data.design.vec <- as.matrix(data.design)
+
+# Run PLSC analysis
+# Block 1: Socioenvironmental factors (X matrix)
+# Block 2: Depression symptoms (Y matrix)
+pls.res <- tepPLS(
+  data1,  # Socioenvironmental
+  data2,  # Depression
+  DESIGN = data.design.vec,
+  make_design_nominal = TRUE,
+  graphs = FALSE
+)
+
+cat("PLSC Analysis Complete\n")
+cat("Number of components:", length(pls.res$TExPosition.Data$eigs), "\n")
+```
+
+### 3. Permutation Test - Number of Significant Dimensions
+
+```{r permutation_test, cache=TRUE}
+# Number of eigenvalues
+nL <- min(ncol(data1), ncol(data2))
+
+# Permutation test to determine significance
+# NOTE: For final analysis, use nIter = 10000
+resPerm4PLSC <- perm4PLSC(
+  data1,          # Socioenvironmental
+  data2,          # Depression
+  permType = "byColumns",
+  nIter = 1000    # Use 10000 for final analysis
+)
+
+cat("\n=== Permutation Test Results ===\n")
+cat("Omnibus p-value:", resPerm4PLSC$pOmnibus, "\n")
+print(resPerm4PLSC)
+```
+
+### 4. Scree Plot
+
+```{r scree_plot, fig.width=10, fig.height=6}
+# Create scree data frame
+scree_df <- data.frame(
+  Component = 1:length(pls.res$TExPosition.Data$eigs),
+  Eigenvalue = pls.res$TExPosition.Data$eigs,
+  pValue = resPerm4PLSC$pEigenvalues
+)
+
+# Save scree values
+write.csv(scree_df,
+  file = file.path(fig_dir, paste0("scree_values_omnibus-p-", 
+                                    round(resPerm4PLSC$pOmnibus, 4), ".csv")),
+  row.names = FALSE
+)
+
+# Create scree plot
+png(file.path(fig_dir, "PLSC_Scree_Plot.png"), width = 1200, height = 800, res = 150)
+
+my.scree <- PlotScree(
+  ev = pls.res$TExPosition.Data$eigs,
+  p.ev = resPerm4PLSC$pEigenvalues,
+  title = "PLSC Scree Plot: Socioenvironmental vs Depression",
+  plotKaiser = TRUE,
+  col.ns = "gray",
+  col.sig = "red"
+)
+
+dev.off()
+
+# Display in document
+PlotScree(
+  ev = pls.res$TExPosition.Data$eigs,
+  p.ev = resPerm4PLSC$pEigenvalues,
+  title = "PLSC Scree Plot: Socioenvironmental vs Depression",
+  plotKaiser = TRUE,
+  col.ns = "gray",
+  col.sig = "red"
+)
+```
+
+```{r eigenvalue_table}
+# Create eigenvalue table
+eig_table <- data.frame(
+  Component = paste0("Dim", 1:min(10, length(pls.res$TExPosition.Data$eigs))),
+  Eigenvalue = round(pls.res$TExPosition.Data$eigs[1:min(10, length(pls.res$TExPosition.Data$eigs))], 4),
+  pValue = round(resPerm4PLSC$pEigenvalues[1:min(10, length(resPerm4PLSC$pEigenvalues))], 4)
+)
+
+kable(eig_table, caption = "Eigenvalues and p-values (first 10 components)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+---
+
+## Bootstrap Ratios
+
+Bootstrap ratios indicate the reliability of variable contributions to each latent dimension.
+
+### Extract Loadings
+
+```{r extract_loadings}
+# Extract loadings from SVD
+# P = loadings for Block 1 (Socioenvironmental)
+# Q = loadings for Block 2 (Depression)
+P.socioenv <- pls.res$TExPosition.Data$pdq$p
+Q.depression <- pls.res$TExPosition.Data$pdq$q
+
+# Create dataframes
+socioenv_loadings <- as.data.frame(P.socioenv)
+rownames(socioenv_loadings) <- colnames(data1)
+
+depression_loadings <- as.data.frame(Q.depression)
+rownames(depression_loadings) <- colnames(data2)
+
+cat("Loadings extracted\n")
+cat("Socioenvironmental loadings:", dim(socioenv_loadings), "\n")
+cat("Depression loadings:", dim(depression_loadings), "\n")
+```
+
+### Bootstrap Analysis
+
+```{r bootstrap, cache=TRUE}
+# Run bootstrap analysis
+# NOTE: For final analysis, use nIter = 10000
+resBoot4PLSC <- Boot4PLSC(
+  data1,  # Socioenvironmental
+  data2,  # Depression
+  nIter = 1000,  # Use 10000 for final analysis
+  Fi = pls.res$TExPosition.Data$fi,
+  Fj = pls.res$TExPosition.Data$fj,
+  nf2keep = min(5, length(pls.res$TExPosition.Data$eigs)),
+  critical.value = 2,
+  alphaLevel = 0.05
+)
+
+cat("Bootstrap analysis complete\n")
+```
+
+```{r bootstrap_ratios}
+# Extract bootstrap ratios
+BR.I <- resBoot4PLSC$bootRatios.i  # Block 1: Socioenvironmental
+BR.J <- resBoot4PLSC$bootRatios.j  # Block 2: Depression
+
+# Create combined results dataframes
+socioenv_results <- cbind.data.frame(
+  Loading = socioenv_loadings,
+  BootstrapRatio = as.data.frame(BR.I)
+)
+
+depression_results <- cbind.data.frame(
+  Loading = depression_loadings,
+  BootstrapRatio = as.data.frame(BR.J)
+)
+
+# Save results
+write.csv(socioenv_results, 
+          file.path(out_dir, "socioenv_loadings_bootstrap.csv"),
+          row.names = TRUE)
+
+write.csv(depression_results,
+          file.path(out_dir, "depression_loadings_bootstrap.csv"),
+          row.names = TRUE)
+
+cat("Results saved\n")
+```
+
+### Determine Significant Dimensions
+
+```{r sig_dimensions}
+# Determine number of significant dimensions
+laDim <- 1  # Default to dimension 1
+
+if (resPerm4PLSC$pOmnibus < 0.05) {
+  # Find significant dimensions
+  significant_dims <- which(resPerm4PLSC$pEigenvalues < 0.05)
+  
+  if (length(significant_dims) > 0) {
+    laDim <- max(significant_dims)
+  }
+  
+  cat("=== Significant Dimensions ===\n")
+  cat("Omnibus test p-value:", resPerm4PLSC$pOmnibus, "\n")
+  cat("Significant dimensions (p < 0.05):", significant_dims, "\n")
+  cat("Number of significant dimensions:", length(significant_dims), "\n")
+} else {
+  cat("Omnibus test not significant (p =", resPerm4PLSC$pOmnibus, ")\n")
+  cat("Interpreting dimension 1 with caution\n")
+}
+```
+
+### Bootstrap Ratio Plots
+
+```{r bootstrap_plots, fig.width=14, fig.height=8}
+# Define dimensions to plot
+n_dims_to_plot <- min(4, length(significant_dims))
+if (n_dims_to_plot == 0) n_dims_to_plot <- 1
+dimensions_to_plot <- 1:n_dims_to_plot
+
+for (dim in dimensions_to_plot) {
+  cat("\n=== Component", dim, "===\n")
+  
+  # --- Block 1: Socioenvironmental ---
+  png(file.path(fig_dir, paste0("Bootstrap_Ratio_Socioenv_Dim", dim, ".png")),
+      width = 2000, height = 1200, res = 150)
+  
+  # Color by variable type
+  var_colors <- case_when(
+    grepl("fes|family|cohes|confl|expr|org|rec", rownames(BR.I), ignore.case = TRUE) ~ "forestgreen",  # Family
+    grepl("meim|ethnic|nbh|school|srpf", rownames(BR.I), ignore.case = TRUE) ~ "steelblue",  # Cultural/Social
+    grepl("coi|income|edu|disadvantage|affluence|factor1|factor3|aff", rownames(BR.I), ignore.case = TRUE) ~ "darkorange",  # SES
+    TRUE ~ "gray50"
+  )
+  
+  plot_socioenv <- PrettyBarPlot2(BR.I[, dim],
+    threshold = 2,
+    font.size = 3,
+    color.bar = var_colors,
+    ylab = "Bootstrap Ratios"
+  ) + 
+    ggtitle(paste0("Component ", dim), 
+            subtitle = "Socioenvironmental: Family (green), Cultural/Social (blue), SES (orange)") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+  
+  print(plot_socioenv)
+  dev.off()
+  
+  # --- Block 2: Depression ---
+  png(file.path(fig_dir, paste0("Bootstrap_Ratio_Depression_Dim", dim, ".png")),
+      width = 2000, height = 1200, res = 150)
+  
+  # Color by reporter (Parent vs Youth)
+  reporter_colors <- ifelse(grepl("_p_|parent|cbcl", rownames(BR.J), ignore.case = TRUE), 
+                            "coral", "purple")
+  
+  plot_depression <- PrettyBarPlot2(BR.J[, dim],
+    threshold = 2,
+    font.size = 3,
+    color.bar = reporter_colors,
+    ylab = "Bootstrap Ratios"
+  ) + 
+    ggtitle(paste0("Component ", dim), 
+            subtitle = "Depression: Parent-report (coral) & Youth-report (purple)") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+  
+  print(plot_depression)
+  dev.off()
+  
+  cat("Saved bootstrap ratio plots for Dimension", dim, "\n")
+}
+```
+
+---
+
+## Variance Explained
+
+```{r variance_explained}
+# Calculate percent variance from eigenvalues
+eigenvalues <- pls.res$TExPosition.Data$eigs
+
+# Percent variance explained by each component
+pctVar_explained <- (eigenvalues / sum(eigenvalues)) * 100
+
+# Cumulative percent variance
+cumVar_explained <- cumsum(pctVar_explained)
+
+# Create summary table
+variance_table <- data.frame(
+  Component = paste0("Dim", 1:length(eigenvalues)),
+  Eigenvalue = round(eigenvalues, 4),
+  Percent_Variance = round(pctVar_explained, 2),
+  Cumulative_Variance = round(cumVar_explained, 2),
+  p_value = round(resPerm4PLSC$pEigenvalues, 4)
+)
+
+cat("\n=== Variance Explained by Each Component ===\n")
+print(variance_table)
+
+kable(variance_table, caption = "Variance Explained by PLSC Components") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+---
+
+## Latent Variable Scores
+
+Save latent variable scores for Stage 2 analysis (Brain correlations).
+
+```{r latent_scores}
+# Extract latent variable scores
+# lx = scores for Block 1 (Socioenvironmental)
+# ly = scores for Block 2 (Depression)
+
+lx_scores <- pls.res$TExPosition.Data$lx
+ly_scores <- pls.res$TExPosition.Data$ly
+
+# Save scores
+write.csv(lx_scores, 
+          file.path(out_dir, "latent_scores_socioenvironmental.csv"),
+          row.names = TRUE)
+
+write.csv(ly_scores,
+          file.path(out_dir, "latent_scores_depression.csv"),
+          row.names = TRUE)
+
+cat("Latent variable scores saved\n")
+```
+
+### Latent Variable Correlation (Socioenvironmental ↔ Depression)
+
+```{r lv_correlation, fig.width=8, fig.height=6}
+# Plot correlation between latent variables for significant dimensions
+for (dim in 1:min(3, ncol(lx_scores))) {
+  
+  # Calculate correlation
+  r <- cor(lx_scores[, dim], ly_scores[, dim])
+  
+  # Create scatter plot
+  lv_plot <- ggplot(data.frame(LVx = lx_scores[, dim], LVy = ly_scores[, dim]),
+                    aes(x = LVx, y = LVy)) +
+    geom_point(alpha = 0.5, color = "steelblue") +
+    geom_smooth(method = "lm", color = "red", se = TRUE) +
+    labs(
+      title = paste0("Latent Variable Correlation - Dimension ", dim),
+      subtitle = paste0("r = ", round(r, 3)),
+      x = "LV Score: Socioenvironmental Factors",
+      y = "LV Score: Depression Symptoms"
+    ) +
+    theme_minimal()
+  
+  print(lv_plot)
+  
+  ggsave(file.path(fig_dir, paste0("LV_Correlation_Socioenv_Depression_Dim", dim, ".png")),
+         lv_plot, width = 8, height = 6, dpi = 150)
+}
+```
+
+---
+
+# STAGE 2: Brain's Role in the Socioenvironmental-Depression Association
+
+Now we examine how hippocampus and amygdala activation relates to the PLSC latent variables.
+
+This addresses the key question: **Do hippocampus/amygdala mediate the association between socioenvironmental factors and depression?**
+
+**4 Brain ROIs analyzed SEPARATELY:**
+
+1. **Left Hippocampus** (`mr_y_tfmri__nback__2bv0b__aseg__hc__lh_beta`) - 2-back vs 0-back (working memory)
+2. **Right Hippocampus** (`mr_y_tfmri__nback__2bv0b__aseg__hc__rh_beta`) - 2-back vs 0-back (working memory)
+3. **Left Amygdala** (`mr_y_tfmri__nback__emovntf__aseg__ag__lh_beta`) - Emotion vs neutral face
+4. **Right Amygdala** (`mr_y_tfmri__nback__emovntf__aseg__ag__rh_beta`) - Emotion vs neutral face
+
+## Define Brain ROIs
+
+```{r define_brain_rois}
+# Define the 4 brain ROIs with exact ABCD variable names
+brain_rois <- list(
+  "Left_Hippocampus_2b_0b" = "mr_y_tfmri__nback__2bv0b__aseg__hc__lh_beta",
+  "Right_Hippocampus_2b_0b" = "mr_y_tfmri__nback__2bv0b__aseg__hc__rh_beta",
+  "Left_Amygdala_emo_neut" = "mr_y_tfmri__nback__emovntf__aseg__ag__lh_beta",
+  "Right_Amygdala_emo_neut" = "mr_y_tfmri__nback__emovntf__aseg__ag__rh_beta"
+)
+
+# Labels for plotting
+brain_roi_labels <- c(
+  "mr_y_tfmri__nback__2bv0b__aseg__hc__lh_beta" = "Left Hippocampus (2-back > 0-back)",
+  "mr_y_tfmri__nback__2bv0b__aseg__hc__rh_beta" = "Right Hippocampus (2-back > 0-back)",
+  "mr_y_tfmri__nback__emovntf__aseg__ag__lh_beta" = "Left Amygdala (emotion > neutral)",
+  "mr_y_tfmri__nback__emovntf__aseg__ag__rh_beta" = "Right Amygdala (emotion > neutral)"
+)
+
+cat("4 Brain ROIs defined for separate analysis:\n")
+for (name in names(brain_rois)) {
+  cat("  -", name, ":", brain_rois[[name]], "\n")
+}
+```
+
+## Create Latent Variable Scores
+
+```{r combined_lv}
+# Create dataframe with latent scores for analysis
+lv_df <- data.frame(
+  subject = rownames(lx_scores),
+  # Socioenvironmental latent scores
+  LV_socioenv_dim1 = lx_scores[, 1],
+  LV_socioenv_dim2 = if(ncol(lx_scores) > 1) lx_scores[, 2] else NA,
+  LV_socioenv_dim3 = if(ncol(lx_scores) > 2) lx_scores[, 3] else NA,
+  # Depression latent scores
+  LV_depression_dim1 = ly_scores[, 1],
+  LV_depression_dim2 = if(ncol(ly_scores) > 1) ly_scores[, 2] else NA,
+  LV_depression_dim3 = if(ncol(ly_scores) > 2) ly_scores[, 3] else NA
+)
+
+# Remove NA columns
+lv_df <- lv_df[, colSums(is.na(lv_df)) < nrow(lv_df)]
+
+cat("Latent variable dataframe created with", ncol(lv_df) - 1, "LV scores\n")
+```
+
+## Correlate Each Brain ROI with PLSC Latent Variables (Separately)
+
+```{r brain_lv_correlation, fig.width=12, fig.height=10}
+# Prepare brain data (residualized)
+brain_data <- as.data.frame(Brain_residuals)
+
+# Ensure same subjects
+common_subjects <- intersect(rownames(brain_data), rownames(lx_scores))
+brain_data <- brain_data[common_subjects, ]
+lv_df_matched <- lv_df[lv_df$subject %in% common_subjects, ]
+
+cat("Subjects with both brain and LV data:", length(common_subjects), "\n")
+
+# Initialize results list for each ROI
+roi_results <- list()
+
+# ==========================================================
+# ANALYZE EACH OF THE 4 FC MEASURES SEPARATELY
+# ==========================================================
+
+for (roi_name in names(brain_rois)) {
+  roi_var <- brain_rois[[roi_name]]
+  
+  cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+  cat("ANALYZING:", roi_name, "\n")
+  cat("Variable:", roi_var, "\n")
+  cat(paste(rep("=", 60), collapse = ""), "\n")
+  
+  # Check if variable exists in data
+  if (!roi_var %in% colnames(brain_data)) {
+    cat("WARNING: Variable", roi_var, "not found in brain data. Skipping...\n")
+    next
+  }
+  
+  # Extract this ROI's data
+  roi_data <- brain_data[[roi_var]]
+  
+  # Correlate with each LV
+  roi_cors <- data.frame()
+  
+  for (lv_var in colnames(lv_df_matched)[-1]) {  # Skip subject column
+    if (!is.na(lv_df_matched[[lv_var]][1])) {
+      cor_test <- cor.test(roi_data, lv_df_matched[[lv_var]])
+      
+      roi_cors <- rbind(roi_cors, data.frame(
+        ROI = roi_name,
+        ROI_Variable = roi_var,
+        Latent_Variable = lv_var,
+        r = cor_test$estimate,
+        t_stat = cor_test$statistic,
+        df = cor_test$parameter,
+        p_value = cor_test$p.value,
+        CI_lower = cor_test$conf.int[1],
+        CI_upper = cor_test$conf.int[2]
+      ))
+    }
+  }
+  
+  # FDR correction within this ROI
+  roi_cors$p_fdr <- p.adjust(roi_cors$p_value, method = "fdr")
+  roi_cors$significant <- roi_cors$p_fdr < 0.05
+  
+  # Store results
+  roi_results[[roi_name]] <- roi_cors
+  
+  # Print results for this ROI
+  cat("\nResults for", roi_name, ":\n")
+  print(roi_cors[, c("Latent_Variable", "r", "p_value", "p_fdr", "significant")])
+  
+  # Save individual ROI results
+  write.csv(roi_cors, 
+            file.path(out_dir, paste0("brain_lv_cors_", roi_name, ".csv")),
+            row.names = FALSE)
+}
+
+# Combine all ROI results
+brain_lv_cors <- do.call(rbind, roi_results)
+
+# Apply FDR correction across ALL tests
+brain_lv_cors$p_fdr_global <- p.adjust(brain_lv_cors$p_value, method = "fdr")
+brain_lv_cors$significant_global <- brain_lv_cors$p_fdr_global < 0.05
+
+# Sort by absolute correlation
+brain_lv_cors <- brain_lv_cors[order(-abs(brain_lv_cors$r)), ]
+
+cat("\n=== ALL BRAIN-LV CORRELATIONS (Combined) ===\n")
+print(head(brain_lv_cors, 20))
+
+# Save combined results
+write.csv(brain_lv_cors, 
+          file.path(out_dir, "brain_latent_variable_correlations_all_rois.csv"),
+          row.names = FALSE)
+```
+
+## Visualization: Individual ROI Scatter Plots
+
+```{r brain_lv_scatter_by_roi, fig.width=14, fig.height=12}
+# Create scatter plots for EACH of the 4 ROIs separately
+library(ggplot2)
+library(cowplot)
+
+# Get number of LV dimensions to plot
+n_lv_dims <- length(grep("LV_", colnames(lv_df_matched))) - 1  # Subtract subject
+lv_cols <- grep("LV_", colnames(lv_df_matched), value = TRUE)
+lv_cols <- lv_cols[!grepl("subject", lv_cols)]
+
+cat("Latent variables to correlate:", paste(lv_cols, collapse = ", "), "\n")
+
+# Create plots for each ROI
+for (roi_name in names(brain_rois)) {
+  roi_var <- brain_rois[[roi_name]]
+  
+  # Skip if variable not found
+  if (!roi_var %in% colnames(brain_data)) {
+    next
+  }
+  
+  cat("\n=== Creating plots for:", roi_name, "===\n")
+  
+  # Get results for this ROI
+  roi_cors <- roi_results[[roi_name]]
+  
+  # Determine colors based on region type
+  is_hippo <- grepl("Hippo", roi_name)
+  region_color <- ifelse(is_hippo, "forestgreen", "purple")
+  region_label <- brain_roi_labels[roi_var]
+  
+  # Create scatter plot for each LV dimension
+  plot_list <- list()
+  
+  for (lv_var in lv_cols) {
+    # Get correlation stats
+    cor_row <- roi_cors[roi_cors$Latent_Variable == lv_var, ]
+    if (nrow(cor_row) == 0) next
+    
+    r_val <- cor_row$r
+    p_val <- cor_row$p_value
+    p_fdr <- cor_row$p_fdr
+    sig_marker <- ifelse(p_fdr < 0.05, "*", "")
+    
+    plot_df <- data.frame(
+      Brain = brain_data[[roi_var]],
+      LV = lv_df_matched[[lv_var]]
+    )
+    
+    # Create plot
+    p <- ggplot(plot_df, aes(x = LV, y = Brain)) +
+      geom_point(alpha = 0.4, color = region_color, size = 1.5) +
+      geom_smooth(method = "lm", color = "black", se = TRUE, linewidth = 0.8) +
+      labs(
+        title = gsub("_", " ", lv_var),
+        subtitle = paste0("r = ", round(r_val, 3), ", p(FDR) = ", 
+                         format(p_fdr, digits = 2, scientific = TRUE), sig_marker),
+        x = "Latent Variable Score",
+        y = "Activation (residualized)"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 9, face = "bold"),
+        plot.subtitle = element_text(size = 8),
+        axis.title = element_text(size = 8)
+      )
+    
+    plot_list[[lv_var]] <- p
+  }
+  
+  # Combine plots
+  if (length(plot_list) > 0) {
+    combined_plot <- plot_grid(
+      plotlist = plot_list,
+      ncol = min(3, length(plot_list)),
+      labels = NULL
+    )
+    
+    # Add title
+    title <- ggdraw() + 
+      draw_label(
+        region_label,
+        fontface = 'bold',
+        size = 12,
+        color = region_color
+      )
+    
+    final_plot <- plot_grid(title, combined_plot, ncol = 1, rel_heights = c(0.1, 1))
+    
+    print(final_plot)
+    
+    # Save
+    ggsave(file.path(fig_dir, paste0("Brain_LV_", roi_name, "_AllDims.png")),
+           final_plot, width = 12, height = 8, dpi = 150)
+    
+    cat("Saved:", paste0("Brain_LV_", roi_name, "_AllDims.png"), "\n")
+  }
+}
+```
+
+## Visualization: Summary Comparison Across All 4 ROIs
+
+```{r brain_lv_heatmap, fig.width=14, fig.height=8}
+# Create correlation matrix for heatmap comparison across ROIs
+library(tidyr)
+
+if (nrow(brain_lv_cors) > 0) {
+  # Reshape to wide format - ROIs as rows, LVs as columns
+  brain_lv_matrix <- brain_lv_cors %>%
+    select(ROI, Latent_Variable, r) %>%
+    pivot_wider(names_from = Latent_Variable, values_from = r) %>%
+    column_to_rownames("ROI") %>%
+    as.matrix()
+  
+  # Create significance matrix
+  brain_lv_sig <- brain_lv_cors %>%
+    select(ROI, Latent_Variable, p_fdr) %>%
+    pivot_wider(names_from = Latent_Variable, values_from = p_fdr) %>%
+    column_to_rownames("ROI") %>%
+    as.matrix()
+  
+  # Create heatmap
+  png(file.path(fig_dir, "Brain_ROI_LV_Correlation_Heatmap_4ROIs.png"), 
+      width = 1600, height = 800, res = 150)
+  
+  corrplot(brain_lv_matrix,
+    is.corr = FALSE,
+    method = "color",
+    tl.cex = 0.8,
+    tl.col = "black",
+    cl.pos = "b",
+    cl.cex = 0.7,
+    title = "4 Brain ROIs × Socio-Depression Latent Variables",
+    cex.main = 1.0,
+    mar = c(0, 0, 2, 0),
+    col = colorRampPalette(c("darkred", "white", "midnightblue"))(100),
+    addCoef.col = "black",
+    number.cex = 0.7
+  )
+  
+  dev.off()
+  
+  # Display
+  corrplot(brain_lv_matrix,
+    is.corr = FALSE,
+    method = "color",
+    tl.cex = 0.8,
+    tl.col = "black",
+    cl.pos = "b",
+    cl.cex = 0.7,
+    title = "4 Brain ROIs × Socio-Depression Latent Variables",
+    cex.main = 1.0,
+    mar = c(0, 0, 2, 0),
+    col = colorRampPalette(c("darkred", "white", "midnightblue"))(100),
+    addCoef.col = "black",
+    number.cex = 0.7
+  )
+  
+  cat("\nHeatmap saved to:", file.path(fig_dir, "Brain_ROI_LV_Correlation_Heatmap_4ROIs.png"), "\n")
+}
+```
+
+## Individual ROI Significance Tests
+
+```{r brain_lv_scatter, fig.width=10, fig.height=8}
+# Summary table for each ROI
+cat("\n=== INDIVIDUAL ROI ANALYSIS RESULTS ===\n\n")
+
+# Create summary table
+roi_summary <- data.frame()
+
+for (roi_name in names(roi_results)) {
+  roi_data <- roi_results[[roi_name]]
+  
+  roi_summary <- rbind(roi_summary, data.frame(
+    ROI = roi_name,
+    N_Tests = nrow(roi_data),
+    N_Sig_Uncorrected = sum(roi_data$p_value < 0.05),
+    N_Sig_FDR = sum(roi_data$p_fdr < 0.05),
+    Max_r = max(abs(roi_data$r)),
+    Best_LV = roi_data$Latent_Variable[which.max(abs(roi_data$r))],
+    Min_p = min(roi_data$p_value)
+  ))
+}
+
+print(roi_summary)
+
+kable(roi_summary, caption = "Summary of Brain-LV Correlations by ROI") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Display significant results after FDR correction
+sig_cors <- brain_lv_cors[brain_lv_cors$significant, ]
+
+if (nrow(sig_cors) > 0) {
+  cat("\n=== SIGNIFICANT CORRELATIONS (within-ROI FDR < 0.05) ===\n")
+  print(sig_cors[, c("ROI", "Latent_Variable", "r", "p_value", "p_fdr")])
+} else {
+  cat("\nNo significant brain-LV correlations after within-ROI FDR correction.\n")
+  
+  # Show uncorrected significant results
+  uncorr_sig <- brain_lv_cors[brain_lv_cors$p_value < 0.05, ]
+  if (nrow(uncorr_sig) > 0) {
+    cat("\nUncorrected p < 0.05 results (interpret with caution):\n")
+    print(uncorr_sig[, c("ROI", "Latent_Variable", "r", "p_value")])
+  }
+}
+```
+
+## Summary: 4 ROIs - Hippocampus vs Amygdala Patterns
+
+```{r region_summary}
+# Separate hippocampus and amygdala results
+hippo_cors <- brain_lv_cors[grepl("Hippo", brain_lv_cors$ROI, ignore.case = TRUE), ]
+amyg_cors <- brain_lv_cors[grepl("Amyg", brain_lv_cors$ROI, ignore.case = TRUE), ]
+
+cat("\n========================================\n")
+cat("HIPPOCAMPUS (2-back > 0-back)\n")
+cat("Working memory-related activation\n")
+cat("========================================\n")
+
+cat("\n--- Left Hippocampus ---\n")
+lh_hippo <- brain_lv_cors[brain_lv_cors$ROI == "Left_Hippocampus_2b_0b", ]
+if (nrow(lh_hippo) > 0) {
+  print(lh_hippo[order(-abs(lh_hippo$r)), c("Latent_Variable", "r", "p_value", "p_fdr", "significant")])
+}
+
+cat("\n--- Right Hippocampus ---\n")
+rh_hippo <- brain_lv_cors[brain_lv_cors$ROI == "Right_Hippocampus_2b_0b", ]
+if (nrow(rh_hippo) > 0) {
+  print(rh_hippo[order(-abs(rh_hippo$r)), c("Latent_Variable", "r", "p_value", "p_fdr", "significant")])
+}
+
+cat("\n========================================\n")
+cat("AMYGDALA (emotion > neutral face)\n")
+cat("Emotional processing activation\n")
+cat("========================================\n")
+
+cat("\n--- Left Amygdala ---\n")
+lh_amyg <- brain_lv_cors[brain_lv_cors$ROI == "Left_Amygdala_emo_neut", ]
+if (nrow(lh_amyg) > 0) {
+  print(lh_amyg[order(-abs(lh_amyg$r)), c("Latent_Variable", "r", "p_value", "p_fdr", "significant")])
+}
+
+cat("\n--- Right Amygdala ---\n")
+rh_amyg <- brain_lv_cors[brain_lv_cors$ROI == "Right_Amygdala_emo_neut", ]
+if (nrow(rh_amyg) > 0) {
+  print(rh_amyg[order(-abs(rh_amyg$r)), c("Latent_Variable", "r", "p_value", "p_fdr", "significant")])
+}
+
+# Overall summary
+cat("\n========================================\n")
+cat("OVERALL SUMMARY\n")
+cat("========================================\n")
+
+cat("\nHippocampus (both hemispheres):\n")
+cat("  Correlations tested:", nrow(hippo_cors), "\n")
+cat("  Significant (FDR < 0.05):", sum(hippo_cors$significant), "\n")
+cat("  Mean |r|:", round(mean(abs(hippo_cors$r)), 3), "\n")
+cat("  Range |r|:", round(min(abs(hippo_cors$r)), 3), "-", round(max(abs(hippo_cors$r)), 3), "\n")
+
+cat("\nAmygdala (both hemispheres):\n")
+cat("  Correlations tested:", nrow(amyg_cors), "\n")
+cat("  Significant (FDR < 0.05):", sum(amyg_cors$significant), "\n")
+cat("  Mean |r|:", round(mean(abs(amyg_cors$r)), 3), "\n")
+cat("  Range |r|:", round(min(abs(amyg_cors$r)), 3), "-", round(max(abs(amyg_cors$r)), 3), "\n")
+```
+
+---
+
+## Interpretation Summary
+
+```{r interpretation, results='asis'}
+cat("\n# Key Findings\n\n")
+
+cat("## Stage 1: Socioenvironmental ↔ Depression PLSC\n\n")
+
+# Summarize significant dimensions
+if (resPerm4PLSC$pOmnibus < 0.05) {
+  cat("The PLSC analysis revealed **", length(significant_dims), 
+      " significant dimension(s)** linking socioenvironmental factors to depression symptoms.\n\n")
+  
+  for (dim in significant_dims[1:min(3, length(significant_dims))]) {
+    cat("### Dimension ", dim, "\n\n")
+    cat("- **Variance explained:** ", round(pctVar_explained[dim], 2), "%\n")
+    cat("- **p-value:** ", round(resPerm4PLSC$pEigenvalues[dim], 4), "\n\n")
+    
+    # Top contributing Socioenvironmental variables
+    top_socioenv <- sort(abs(BR.I[, dim]), decreasing = TRUE)[1:5]
+    cat("**Top Socioenvironmental contributors:**\n")
+    for (i in 1:length(top_socioenv)) {
+      var_name <- names(top_socioenv)[i]
+      br_value <- BR.I[var_name, dim]
+      direction <- ifelse(br_value > 0, "(+)", "(-)")
+      cat("- ", var_name, ": BR = ", round(br_value, 2), " ", direction, "\n")
+    }
+    cat("\n")
+    
+    # Top contributing Depression variables
+    top_depression <- sort(abs(BR.J[, dim]), decreasing = TRUE)[1:5]
+    cat("**Top Depression contributors:**\n")
+    for (i in 1:length(top_depression)) {
+      var_name <- names(top_depression)[i]
+      br_value <- BR.J[var_name, dim]
+      direction <- ifelse(br_value > 0, "(+)", "(-)")
+      cat("- ", var_name, ": BR = ", round(br_value, 2), " ", direction, "\n")
+    }
+    cat("\n")
+  }
+} else {
+  cat("The omnibus test was not significant (p = ", round(resPerm4PLSC$pOmnibus, 4), 
+      "). Results should be interpreted with caution.\n\n")
+}
+
+cat("\n## Stage 2: Brain's Role (4 ROIs Analyzed Separately)\n\n")
+
+cat("### ROI Analysis Summary:\n\n")
+cat("| ROI | Contrast | Mean |r| | Max |r| | Significant (FDR) |\n")
+cat("|-----|----------|---------|---------|-------------------|\n")
+
+for (roi_name in names(roi_results)) {
+  roi_data <- roi_results[[roi_name]]
+  contrast <- ifelse(grepl("Hippo", roi_name), "2-back > 0-back", "Emotion > Neutral")
+  mean_r <- round(mean(abs(roi_data$r)), 3)
+  max_r <- round(max(abs(roi_data$r)), 3)
+  n_sig <- sum(roi_data$p_fdr < 0.05)
+  
+  cat("| ", gsub("_", " ", roi_name), " | ", contrast, " | ", mean_r, " | ", max_r, " | ", n_sig, " |\n")
+}
+
+cat("\n### Interpretation by Region:\n\n")
+
+cat("**Hippocampus (2-back > 0-back working memory):**\n")
+hippo_sig <- sum(hippo_cors$significant)
+if (hippo_sig > 0) {
+  cat("- ", hippo_sig, " significant correlations with socio-depression latent variables\n")
+  cat("- Suggests working memory-related hippocampal function is associated with the socio-depression relationship\n\n")
+} else {
+  cat("- No significant correlations after FDR correction\n")
+  cat("- Working memory-related hippocampal activation may not mediate the socio-depression link\n\n")
+}
+
+cat("**Amygdala (emotion > neutral face):**\n")
+amyg_sig <- sum(amyg_cors$significant)
+if (amyg_sig > 0) {
+  cat("- ", amyg_sig, " significant correlations with socio-depression latent variables\n")
+  cat("- Suggests emotional reactivity in the amygdala is linked to the socio-depression relationship\n\n")
+} else {
+  cat("- No significant correlations after FDR correction\n")
+  cat("- Emotional face processing in amygdala may not strongly mediate the socio-depression link\n\n")
+}
+
+cat("### Hemispheric Differences:\n\n")
+# Compare left vs right for each structure
+cat("Comparing left vs right hemispheres...\n")
+lh_hippo_r <- mean(abs(brain_lv_cors[brain_lv_cors$ROI == "Left_Hippocampus_2b_0b", "r"]))
+rh_hippo_r <- mean(abs(brain_lv_cors[brain_lv_cors$ROI == "Right_Hippocampus_2b_0b", "r"]))
+lh_amyg_r <- mean(abs(brain_lv_cors[brain_lv_cors$ROI == "Left_Amygdala_emo_neut", "r"]))
+rh_amyg_r <- mean(abs(brain_lv_cors[brain_lv_cors$ROI == "Right_Amygdala_emo_neut", "r"]))
+
+cat("- Hippocampus: Left mean |r| =", round(lh_hippo_r, 3), ", Right mean |r| =", round(rh_hippo_r, 3), "\n")
+cat("- Amygdala: Left mean |r| =", round(lh_amyg_r, 3), ", Right mean |r| =", round(rh_amyg_r, 3), "\n")
+```
+
+---
+## Session Info
+
+```{r session_info}
+sessionInfo()
+```
+
+---
+
+## Files Generated
+
+```{r files_list}
+cat("\n=== Output Files ===\n")
+cat("\nFigures directory:", fig_dir, "\n")
+
+# List generated files
+if (dir.exists(fig_dir)) {
+  cat("\nFigures:\n")
+  print(list.files(fig_dir, pattern = "\\.(png|pdf)$"))
+}
+
+cat("\nData files:\n")
+print(list.files(out_dir, pattern = "\\.csv$"))
+```

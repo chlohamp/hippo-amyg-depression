@@ -1,0 +1,467 @@
+---
+title: "ABCD-PLSC-Ap-GM-Rscript"
+author:"Chloe Hampson, Taylor Jancetic, Kirthana"
+date: "2024-09-30"
+output:
+  html_document:
+    fontsize : 9 pt
+    theme: united
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_depth: 6
+---
+
+## Import Libraries
+```{r}
+rm(list = ls()) # Clear environment
+graphics.off() # Clear all plots
+
+# Load necessary libraries
+library(tidyverse) # Core tidyverse packages
+library(ExPosition) # Multivariate data analysis
+library(TExPosition) # Tensor-based ExPosition analysis
+# library(TInPosition)  # Uncomment if needed and installed
+library(PTCA4CATA) # Permutation Tests for CATA
+library(data4PCCAR) # Example datasets for PCA
+library(plyr) # Data manipulation (load first to avoid conflicts)
+library(dplyr) # Data manipulation
+library(corrplot) # Correlation plots
+library(ggplot2) # Data visualization
+library(cowplot) # Plot arrangement
+library(readr) # Reading data files
+library(gridExtra) # Arrange grid-based visualizations
+library(grid) # Low-level graphics system
+library(here) # Relative file paths
+library(psych) # Psychometric tools
+library(car)
+library(kableExtra)
+```
+
+
+**Data :**  cleaned data, pre processed and grouped into two different datasets - one for RSI measures and other for sociocultural measures from ABCD data.
+
+```{r}
+# load datasets
+covar_df <- read_csv("/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/covariate.csv")
+socio_df <- read_csv("/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/clean-socio.csv")
+rsfc_df <- read_csv("/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/clean-rsfc.csv")
+
+
+fig_dir <- "/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/figures/"
+out_dir <- "/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced"
+
+
+```
+
+## Performing residualization 
+
+###  MLRM for resting-state data
+
+```{r}
+## resting state variables and covariates
+# dependent variables
+Group1.Y <- as.matrix(rsfc_df)
+View(Group1.Y)
+
+# independent variables/covariates
+Group1.X <- covar_df
+View(Group1.X)
+```
+
+
+
+```{r}
+# Multiple regression model
+lm.Group1 <- lm(Group1.Y ~ Group1.X$interview_age +
+  as.factor(Group1.X$demo_sex_v2) +
+  Group1.X$demo_prnt_age_v2 +
+  as.factor(Group1.X$demo_prnt_gender_id_v2) +
+  Group1.X$demo_prnt_ed_v2_2yr_l +
+  Group1.X$demo_prtnr_ed_v2_2yr_l +
+  Group1.X$demo_comb_income_v2 +
+  as.factor(Group1.X$demo_origin_v2) +
+  as.factor(Group1.X$site_id_l) +
+  as.factor(Group1.X$mri_info_manufacturer) +
+  Group1.X$rsfmri_meanmotion, na.action = na.omit)
+
+
+# R.square -> how well the model explains the variation in the data which is not random
+# Theorotical model performace is defined as R square
+
+Group1_residuals <- data.frame()
+Group1_residuals <- as.data.frame(lm.Group1$residuals)
+```
+
+### MLRM for sociocultural data
+
+```{r echo=TRUE}
+Group2.Y <- as.matrix(socio_df)
+
+
+lm.Group2 <- lm(Group2.Y ~ Group1.X$interview_age +
+  as.factor(Group1.X$demo_sex_v2) +
+  Group1.X$demo_prnt_age_v2 +
+  as.factor(Group1.X$demo_prnt_gender_id_v2) +
+  Group1.X$demo_prnt_ed_v2_2yr_l +
+  Group1.X$demo_prtnr_ed_v2_2yr_l +
+  Group1.X$demo_comb_income_v2 +
+  as.factor(Group1.X$demo_origin_v2) +
+  as.factor(Group1.X$site_id_l) +
+  as.factor(Group1.X$mri_info_manufacturer) +
+  Group1.X$rsfmri_meanmotion, na.action = na.omit)
+
+# keep if we decide this is how we want to deal with missing data #,na.action = na.omit)
+# Run VIF to check for multicollinearity
+summary(lm.Group2)
+
+Group2_residuals <- data.frame()
+Group2_residuals <- as.data.frame(lm.Group2$residuals)
+
+```
+
+
+## PLSC Analysis
+
+### 1. Correlation plots
+
+```{r}
+# Input data for PLSC
+data1 <- as.data.frame(Group1_residuals)
+data2 <- as.data.frame(Group2_residuals)
+
+
+# Compute the covariance matrix
+
+XY.cor.pearson <- cor(data2, data1)
+
+# Save the plot as a PNG file with higher resolution
+corr <- paste0(fig_dir, "correlation_plot.png")
+
+
+# Create the plot
+png(corr, width = 1200, height = 800, res = 300) # Increase res to 300 dpi
+
+
+
+# for full
+corrplot(XY.cor.pearson,
+  is.corr = FALSE, # Treat as raw data
+  method = "color",
+  col.lim = c(-0.25, 0.25), # Set color limits
+  tl.cex = 0.2, tl.col = "black", # Smaller text labels
+  cl.pos = "b", cl.cex = 0.3, # Smaller legend text
+  title = "Pearson Correlation",
+  cex.main = 0.8, # Adjust title text size
+  mar = c(0, 0, 1, 0), # Smaller margins
+  lwd = 0.1, # Thinner lines
+  col = colorRampPalette(c("darkred", "white", "midnightblue"))(6)
+)
+dev.off() # Close the device
+
+```
+
+
+### 2. Package details
+
+```{r}
+tepPLS(data1, data2,
+  center1 = TRUE,
+  scale1 = "SS1",
+  center2 = TRUE,
+  scale2 = "SS1",
+  DESIGN = NULL,
+  make_design_nominal = TRUE,
+  graphs = TRUE,
+  k = 0
+)
+```
+
+tepPLS(DATA1, DATA2, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", DESIGN = NULL, make_design_nominal = TRUE, graphs = TRUE, k = 0)
+
+DATA1 : Data matrix 1 (X)
+
+DATA2 : Data matrix 2 (Y)
+
+center1 : a boolean, vector, or string to center DATA1. See expo.scale for details.
+
+scale1 : a boolean, vector, or string to scale DATA1. See expo.scale for details.
+
+center2 : a boolean, vector, or string to center DATA2. See expo.scale for details.
+
+scale2 : a boolean, vector, or string to scale DATA2. See expo.scale for details.
+
+DESIGN : a design matrix to indicate if rows belong to groups.
+
+make_design_nominal	: a boolean. If TRUE (default), DESIGN is a vector that indicates groups (and will be dummy-coded). If FALSE, DESIGN is a dummy-coded matrix.
+
+graphs : a boolean. If TRUE (default), graphs and plots are provided (via tepGraphs)
+
+k	: number of components to return.
+
+
+
+```{r echo=TRUE}
+# Extract design variable and ensure it's a factor (nominal)
+data.design <- as.factor(covar_df$site_id_l)
+
+# Convert to a matrix for PLSC input
+data.design.vec <- as.matrix(data.design)
+rownames(data.design.vec) <- covar_df$src_subject_id
+
+# Run PLSC analysis
+pls.res <- tepPLS(
+  data1,
+  data2,
+  DESIGN = data.design.vec,
+  make_design_nominal = TRUE,
+  graphs = FALSE
+)
+
+summary(pls.res)
+```
+
+### 3. Number of Dimensions
+
+The scree plot shows a weird pattern because the null hypothesis is that there is no correlation between the tables (Null = 0) 
+Hence eigenvalues greater than zero become significant. 
+
+The results of the permutation test gives us the eigenvalues.
+
+```{r echo=TRUE}
+# no.of eigenvalues
+nL <- min(ncol(data1), ncol(data2))
+
+# Applying permutation test to the input data for PLSC
+# should do 10000 iterations
+resPerm4PLSC <- perm4PLSC(data1, # First Data matrix
+  data2, # Second Data matrix
+  permType = "byColumns",
+  nIter = 10000 # How many iterations
+)
+print(resPerm4PLSC)
+
+```
+
+```{r}
+scree_df <- data.frame(row.names = colnames(socio_df))
+scree_df$eigens <- pls.res$TExPosition.Data$eigs
+scree_df$pEigens <- resPerm4PLSC$pEigenvalues
+
+
+write.csv(
+  scree_df,
+  file = paste0(fig_dir, "/rest-scree_values_", resPerm4PLSC$pOmnibus, "-components.csv")
+)
+
+# Set the file path for saving the plot
+png(file.path(fig_dir, "PLSC_Scree_Plot.png"), width = 1200, height = 800, res = 100)
+
+# Create the scree plot
+my.scree <- PlotScree(
+  ev = pls.res$TExPosition.Data$eigs,
+  p.ev = resPerm4PLSC$pEigenvalues,
+  title = "PLSC Scree Plot",
+  plotKaiser = TRUE,
+  col.ns = "black",
+  col.sig = "red"
+)
+
+# Calculate and round eigenvalues to 2 decimal places
+eig <- t(round(pls.res$TExPosition.Data$eigs, 2))
+peig <- t(resPerm4PLSC$pEigenvalues)
+# Create the names for the dimensions
+names <- paste0("dim", seq(1:20))
+# Create the table and print it explicitly
+eig_table <- kable(eig, col.names = names(pls.res$TExPosition.Data$eigs)) %>%
+  kable_styling()
+peig_table <- kable(peig, col.names = names(resPerm4PLSC$pEigenvalues)) %>%
+  kable_styling()
+# Explicitly print the table to the console
+print(eig_table) # Ensure the table is printed
+print(peig_table)
+
+# Close the PNG device
+dev.off()
+```
+
+
+
+# These are the loadings obtained after performing SVD(R) on correlation matrix.
+
+
+```{r}
+# generating bar plots for loadings of Air pollutants data table
+Q.data2 <- pls.res$TExPosition.Data$pdq$q
+# generating bar plots for loadings of RSI data table
+P.data1 <- pls.res$TExPosition.Data$pdq$p
+
+# saving the loading table into excel file.
+socio_loadings <- as.data.frame(Q.data2)
+rest_loadings <- as.data.frame(P.data1)
+```
+```{r}
+# Looking into what the resBootPLSC is giving us
+resBoot4PLSC <- Boot4PLSC(data1, # First Data matrix
+  data2, # Second Data matrix
+  nIter = 10000, # How many iterations
+  Fi = pls.res$TExPosition.Data$fi,
+  Fj = pls.res$TExPosition.Data$fj,
+  nf2keep = 5, #determines number of dimensions that go into bootstrap
+  critical.value = 2.5,
+  # To be implemented later
+  # has no effect currently
+  alphaLevel = 0.5
+)
+
+resBoot4PLSC
+
+```
+
+```{r}
+
+BR.I <- resBoot4PLSC$bootRatios.i
+BR.J <- resBoot4PLSC$bootRatios.j
+
+
+# saving the bootstrap rations into excel
+
+socio_bootstrap <- as.data.frame(BR.J)
+rni_bootstrap <- as.data.frame(BR.I)
+
+socio_res <- cbind.data.frame(socio_loadings, socio_bootstrap)
+rni_res <- cbind.data.frame(rest_loadings, rni_bootstrap)
+
+write.csv(socio_res, paste(out_dir,
+  "rni-sociocult_Q-components.csv",
+  sep = "/"
+), row.names = TRUE)
+
+write.csv(rni_res, paste(out_dir,
+  "rni-brain_P-components.csv",
+  sep = "/"
+), row.names = TRUE)
+
+write.csv(pls.res$TExPosition.Data$lx, paste(out_dir,
+  "rniXrsfc_lx-base.csv",
+  sep = "/"
+), row.names = TRUE)
+
+write.csv(pls.res$TExPosition.Data$ly, paste(out_dir,
+  "rniXrsfc_ly-base.csv",
+  sep = "/"
+), row.names = TRUE)
+
+```
+
+```{r}
+# Determine number of significant dimensions
+# Find the last (highest) dimension with p < 0.01
+laDim <- 1  # Default to dimension 1
+
+if (resPerm4PLSC$pOmnibus < 0.01) {
+  # Find the highest dimension that is still significant
+  significant_dims <- which(resPerm4PLSC$pEigenvalues < 0.01)
+  
+  if (length(significant_dims) > 0) {
+    laDim <- max(significant_dims)  # Take the highest significant dimension
+  }
+  
+  cat("Omnibus test p-value:", resPerm4PLSC$pOmnibus, "\n")
+  cat("Significant dimensions (p < 0.01):", significant_dims, "\n")
+  cat("Number of significant dimensions:", length(significant_dims), "\n")
+  cat("Using dimension:", laDim, "for bootstrap ratio plots\n")
+} else {
+  cat("Omnibus test not significant (p =", resPerm4PLSC$pOmnibus, ")\n")
+  cat("Using dimension 1 by default\n")
+}
+
+print(paste("Selected dimension:", laDim))
+```
+
+
+```
+
+```{r}
+# Bootstrap ratios plots for dimensions 1 and 3
+dimensions_to_plot <- c(1, 2, 3, 4)
+
+for (dim in dimensions_to_plot) {
+  cat("Creating bootstrap ratio plots for Dimension", dim, "\n")
+  
+  # Save the plot for BR.I (Brain/RSFC - Table 1)
+  png(file.path(fig_dir, paste0("Bootstrap_Ratio_BRI_Dim", dim, ".png")), 
+      width = 2000, height = 1200, res = 200)
+  
+  plot_BRI <- PrettyBarPlot2(BR.I[, dim],
+    threshold = 3,
+    font.size = 4,
+    ylab = "Bootstrap ratios"
+  ) + ggtitle(paste0("Component ", dim), subtitle = "Brain Networks (RSFC)")
+  
+  print(plot_BRI)
+  dev.off() # Close the PNG device for BR.I
+  
+  # Save the plot for BR.J (Sociocultural - Table 2)  
+  png(file.path(fig_dir, paste0("Bootstrap_Ratio_BRJ_Dim", dim, ".png")), 
+      width = 2000, height = 1200, res = 200)
+  
+  plot_BRJ <- PrettyBarPlot2(BR.J[, dim],
+    threshold = 3,
+    font.size = 4,
+    ylab = "Bootstrap ratios"
+  ) + ggtitle(paste0("Component ", dim), subtitle = "Sociocultural Variables")
+  
+  print(plot_BRJ)
+  dev.off() # Close the PNG device for BR.J
+  
+  cat("✓ Saved bootstrap ratio plots for Dimension", dim, "\n\n")
+}
+
+# Display which dimension was automatically selected
+cat("Note: Automatically selected dimension based on significance:", laDim, "\n")
+cat("Manually plotting dimensions:", paste(dimensions_to_plot, collapse = ", "), "\n")
+```
+
+### Percent Variance
+```{r echo=TRUE}
+# CORRECT: Calculate percent variance from eigenvalues, not bootstrap ratios
+eigenvalues <- pls.res$TExPosition.Data$eigs
+
+# Percent variance explained by each component
+pctVar_explained <- (eigenvalues / sum(eigenvalues)) * 100
+
+# Cumulative percent variance
+cumVar_explained <- cumsum(pctVar_explained)
+
+# Create a summary table
+variance_table <- data.frame(
+  Component = paste0("Dim", 1:length(eigenvalues)),
+  Eigenvalue = round(eigenvalues, 4),
+  Percent_Variance = round(pctVar_explained, 2),
+  Cumulative_Variance = round(cumVar_explained, 2)
+)
+
+print("Percent Variance Explained by Each Component:")
+print(variance_table)
+
+# For loadings contribution (optional - different from explained variance)
+# This shows how much each variable contributes to bootstrap ratio variance
+ssq.BR.I <- colSums(BR.I^2)
+ssq.BR.J <- colSums(BR.J^2)
+
+# Percent of total bootstrap ratio variance (NOT explained variance)
+pctContrib.BR.I <- ssq.BR.I / sum(ssq.BR.I) * 100
+pctContrib.BR.J <- ssq.BR.J / sum(ssq.BR.J) * 100
+
+print("Bootstrap Ratio Contribution (Variable Stability):")
+print("Block I (Brain):")
+print(round(pctContrib.BR.I, 2))
+print("Block J (Sociocultural):")
+print(round(pctContrib.BR.J, 2))
+
+# Key results for first component
+cat("\n=== SUMMARY FOR DIMENSION 1 ===\n")
+cat("Explained Variance:", round(pctVar_explained[1], 2), "%\n")
+cat("Eigenvalue:", round(eigenvalues[1], 4), "\n")
+```
