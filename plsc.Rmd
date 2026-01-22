@@ -383,13 +383,12 @@ resBoot4PLSC
 BR.I <- resBoot4PLSC$bootRatios.i
 BR.J <- resBoot4PLSC$bootRatios.j
 
-
-# saving the bootstrap rations into excel
+# saving the bootstrap ratios
 
 depression_bootstrap <- as.data.frame(BR.J)
-socioenv_bootstrap <- as.data.frame(BR.I)
+socioenv_bootstrap   <- as.data.frame(BR.I)
 
-socioenv_res <- cbind.data.frame(socioenv_loadings, socioenv_bootstrap)
+socioenv_res  <- cbind.data.frame(socioenv_loadings, socioenv_bootstrap)
 depression_res <- cbind.data.frame(depression_loadings, depression_bootstrap)
 
 write.csv(socioenv_res, paste(out_dir,
@@ -401,6 +400,9 @@ write.csv(depression_res, paste(out_dir,
   "plsc_depression_loadings_bootstrap.csv",
   sep = "/"
 ), row.names = TRUE)
+
+rownames(pls.res$TExPosition.Data$lx) <- covar_df$participant_id
+rownames(pls.res$TExPosition.Data$ly) <- covar_df$participant_id
 
 write.csv(pls.res$TExPosition.Data$lx, paste(out_dir,
   "plsc_LV_scores_socioenv.csv",
