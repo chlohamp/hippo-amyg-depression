@@ -1,10 +1,10 @@
 ---
-title: "ABCD-PLSC-Ap-GM-Rscript"
-author:"Chloe Hampson, Taylor Jancetic, Kirthana"
-date: "2024-09-30"
+title: "PLSC Analysis: Hippocampus & Amygdala Role in Socioenvironmental Factors and Adolescent Depression"
+author: "Chloe Hampson"
+date: "`r Sys.Date()`"
 output:
   html_document:
-    fontsize : 9 pt
+    fontsize: 9pt
     theme: united
     code_folding: hide
     toc: true
@@ -12,10 +12,49 @@ output:
     toc_depth: 6
 ---
 
+# Overview
+
+**Research Question:** What role do the hippocampus and amygdala play in the association between socioenvironmental factors and adolescent depression?
+
+**Analysis Approach:** Two-stage analysis
+
+## Stage 1: PLSC - Socioenvironmental Factors ↔ Depression Symptoms
+- **Block 1 (X matrix):** Socioenvironmental factors (family environment, cultural/social, SES)
+- **Block 2 (Y matrix):** Depression symptoms (CBCL, YSR, KSADS)
+- Identifies latent dimensions linking specific socioenvironmental patterns to depression patterns
+
+## Stage 2: Brain-Behavior Analysis
+- Correlate PLSC latent variable scores with hippocampus/amygdala activation
+- Determines whether brain function mediates/moderates the socio-depression association
+- Can also run secondary PLSC: Brain ↔ PLSC latent scores
+
+---
+
+```{r}
+# ---- KNIT-SAFE SETUP ----
+# Ensures Knit uses your project folder as the working directory.
+knitr::opts_knit$set(root.dir = "/Users/chloehampson/Desktop/hippo-amyg-depression")
+
+# Chunk defaults (adjust if you want messages/warnings)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+options(stringsAsFactors = FALSE)
+
+```
+
+
 ## Import Libraries
+
 ```{r}
 rm(list = ls()) # Clear environment
 graphics.off() # Clear all plots
+
+#install.packages("devtools") # decomment this line if devtools is not yet intalled
+#devtools::install_github('HerveAbdi/PTCA4CATA', dependencies = TRUE, force = TRUE)
 
 # Load necessary libraries
 library(tidyverse) # Core tidyverse packages
@@ -24,8 +63,8 @@ library(TExPosition) # Tensor-based ExPosition analysis
 # library(TInPosition)  # Uncomment if needed and installed
 library(PTCA4CATA) # Permutation Tests for CATA
 library(data4PCCAR) # Example datasets for PCA
-library(plyr) # Data manipulation (load first to avoid conflicts)
 library(dplyr) # Data manipulation
+library(plyr) # Data manipulation (load first to avoid conflicts)
 library(corrplot) # Correlation plots
 library(ggplot2) # Data visualization
 library(cowplot) # Plot arrangement
@@ -39,29 +78,57 @@ library(kableExtra)
 ```
 
 
-**Data :**  cleaned data, pre processed and grouped into two different datasets - one for RSI measures and other for sociocultural measures from ABCD data.
+---
 
-```{r}
-# load datasets
-covar_df <- read_csv("/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/covariate.csv")
-socio_df <- read_csv("/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/clean-socio.csv")
-rsfc_df <- read_csv("/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/clean-rsfc.csv")
+## Load Data
 
+**Data prepared using `data_preparation.ipynb`**
 
-fig_dir <- "/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced/figures/"
-out_dir <- "/Users/chloehampson/Desktop/abcd-plsc/derivatives/none-reduced"
+Four dataframes:
+1. `covariate.csv` - Covariates for residualization
+2. `clean-socioenv.csv` - Socioenvironmental variables (Block 1 for PLSC)
+3. `clean-depression.csv` - Depression symptoms (Block 2 for PLSC)
+4. `clean-brain-hippo-amyg.csv` - Hippocampus & Amygdala activation (for Stage 2)
 
+```{r load_data, message=FALSE}
+# Because we set knitr root.dir to the project folder,
+# we can use RELATIVE paths safely when knitting.
+data_dir <- "derivatives"
+fig_dir  <- file.path(data_dir, "figures")
+out_dir  <- data_dir
+
+# Create figures directory if it doesn't exist
+if (!dir.exists(fig_dir)) {
+  dir.create(fig_dir, recursive = TRUE)
+}
+
+# Load datasets (cleaned CSVs from Python preprocessing)
+covar_df      <- readr::read_csv(file.path(data_dir, "demographics_clean.csv"))
+socioenv_df   <- readr::read_csv(file.path(data_dir, "socioenvironment_clean.csv"))
+depression_df <- readr::read_csv(file.path(data_dir, "depression_clean.csv"))
+brain_df      <- readr::read_csv(file.path(data_dir, "task-FC_clean.csv"))
+
+# Quick sanity checks (optional but helpful)
+stopifnot(nrow(covar_df) > 0, nrow(socioenv_df) > 0, nrow(depression_df) > 0, nrow(brain_df) > 0)
+
+# Print dimensions
+cat("Rows x Cols\n")
+cat("covar_df:     ", nrow(covar_df), "x", ncol(covar_df), "\n")
+cat("socioenv_df:  ", nrow(socioenv_df), "x", ncol(socioenv_df), "\n")
+cat("depression_df:", nrow(depression_df), "x", ncol(depression_df), "\n")
+cat("brain_df:     ", nrow(brain_df), "x", ncol(brain_df), "\n")
 
 ```
+
 
 ## Performing residualization 
 
 ###  MLRM for resting-state data
 
 ```{r}
-## resting state variables and covariates
+## Socioenvironmental data residualization
 # dependent variables
-Group1.Y <- as.matrix(rsfc_df)
+Group1.Y <- as.matrix(socioenv_df)
 View(Group1.Y)
 
 # independent variables/covariates
@@ -73,17 +140,13 @@ View(Group1.X)
 
 ```{r}
 # Multiple regression model
-lm.Group1 <- lm(Group1.Y ~ Group1.X$interview_age +
-  as.factor(Group1.X$demo_sex_v2) +
-  Group1.X$demo_prnt_age_v2 +
-  as.factor(Group1.X$demo_prnt_gender_id_v2) +
-  Group1.X$demo_prnt_ed_v2_2yr_l +
-  Group1.X$demo_prtnr_ed_v2_2yr_l +
-  Group1.X$demo_comb_income_v2 +
-  as.factor(Group1.X$demo_origin_v2) +
-  as.factor(Group1.X$site_id_l) +
-  as.factor(Group1.X$mri_info_manufacturer) +
-  Group1.X$rsfmri_meanmotion, na.action = na.omit)
+lm.Group1 <- lm(Group1.Y ~ Group1.X$ab_p_demo_age +
+  as.factor(Group1.X$ab_g_stc__cohort_sex) +
+  as.factor(Group1.X$ab_g_stc__cohort_ethnrace__meim) +
+  as.factor(Group1.X$ab_g_stc__cohort_race__nih) +
+  as.factor(Group1.X$ab_g_dyn__design_site) +
+  as.factor(Group1.X$mr_y_adm__info__dev_manufact) +
+  Group1.X$ab_g_stc__design_id__fam, na.action = na.omit)
 
 
 # R.square -> how well the model explains the variation in the data which is not random
@@ -96,20 +159,17 @@ Group1_residuals <- as.data.frame(lm.Group1$residuals)
 ### MLRM for sociocultural data
 
 ```{r echo=TRUE}
-Group2.Y <- as.matrix(socio_df)
+Group2.Y <- as.matrix(depression_df)
 
+# Multiple regression model
+lm.Group2 <- lm(Group2.Y ~ Group1.X$ab_p_demo_age +
+  as.factor(Group1.X$ab_g_stc__cohort_sex) +
+  as.factor(Group1.X$ab_g_stc__cohort_ethnrace__meim) +
+  as.factor(Group1.X$ab_g_stc__cohort_race__nih) +
+  as.factor(Group1.X$ab_g_dyn__design_site) +
+  as.factor(Group1.X$mr_y_adm__info__dev_manufact) +
+  Group1.X$ab_g_stc__design_id__fam, na.action = na.omit)
 
-lm.Group2 <- lm(Group2.Y ~ Group1.X$interview_age +
-  as.factor(Group1.X$demo_sex_v2) +
-  Group1.X$demo_prnt_age_v2 +
-  as.factor(Group1.X$demo_prnt_gender_id_v2) +
-  Group1.X$demo_prnt_ed_v2_2yr_l +
-  Group1.X$demo_prtnr_ed_v2_2yr_l +
-  Group1.X$demo_comb_income_v2 +
-  as.factor(Group1.X$demo_origin_v2) +
-  as.factor(Group1.X$site_id_l) +
-  as.factor(Group1.X$mri_info_manufacturer) +
-  Group1.X$rsfmri_meanmotion, na.action = na.omit)
 
 # keep if we decide this is how we want to deal with missing data #,na.action = na.omit)
 # Run VIF to check for multicollinearity
@@ -203,11 +263,11 @@ k	: number of components to return.
 
 ```{r echo=TRUE}
 # Extract design variable and ensure it's a factor (nominal)
-data.design <- as.factor(covar_df$site_id_l)
+data.design <- as.factor(covar_df$ab_g_dyn__design_site)
 
 # Convert to a matrix for PLSC input
 data.design.vec <- as.matrix(data.design)
-rownames(data.design.vec) <- covar_df$src_subject_id
+rownames(data.design.vec) <- covar_df$participant_id
 
 # Run PLSC analysis
 pls.res <- tepPLS(
@@ -291,14 +351,14 @@ dev.off()
 
 
 ```{r}
-# generating bar plots for loadings of Air pollutants data table
+# generating bar plots for loadings of Depression data table
 Q.data2 <- pls.res$TExPosition.Data$pdq$q
-# generating bar plots for loadings of RSI data table
+# generating bar plots for loadings of Sociocultural data table
 P.data1 <- pls.res$TExPosition.Data$pdq$p
 
 # saving the loading table into excel file.
-socio_loadings <- as.data.frame(Q.data2)
-rest_loadings <- as.data.frame(P.data1)
+depression_loadings <- as.data.frame(Q.data2)
+socioenv_loadings <- as.data.frame(P.data1)
 ```
 ```{r}
 # Looking into what the resBootPLSC is giving us
@@ -326,19 +386,19 @@ BR.J <- resBoot4PLSC$bootRatios.j
 
 # saving the bootstrap rations into excel
 
-socio_bootstrap <- as.data.frame(BR.J)
-rni_bootstrap <- as.data.frame(BR.I)
+depression_bootstrap <- as.data.frame(BR.J)
+socioenv_bootstrap <- as.data.frame(BR.I)
 
-socio_res <- cbind.data.frame(socio_loadings, socio_bootstrap)
-rni_res <- cbind.data.frame(rest_loadings, rni_bootstrap)
+socioenv_res <- cbind.data.frame(socioenv_loadings, socioenv_bootstrap)
+depression_res <- cbind.data.frame(depression_loadings, depression_bootstrap)
 
-write.csv(socio_res, paste(out_dir,
+write.csv(socioenv_res, paste(out_dir,
   "rni-sociocult_Q-components.csv",
   sep = "/"
 ), row.names = TRUE)
 
-write.csv(rni_res, paste(out_dir,
-  "rni-brain_P-components.csv",
+write.csv(depression_res, paste(out_dir,
+  "rni-depression_P-components.csv",
   sep = "/"
 ), row.names = TRUE)
 
@@ -389,7 +449,7 @@ dimensions_to_plot <- c(1, 2, 3, 4)
 for (dim in dimensions_to_plot) {
   cat("Creating bootstrap ratio plots for Dimension", dim, "\n")
   
-  # Save the plot for BR.I (Brain/RSFC - Table 1)
+  # Save the plot for BR.I (Socioenvironment - Table 1)
   png(file.path(fig_dir, paste0("Bootstrap_Ratio_BRI_Dim", dim, ".png")), 
       width = 2000, height = 1200, res = 200)
   
@@ -397,12 +457,12 @@ for (dim in dimensions_to_plot) {
     threshold = 3,
     font.size = 4,
     ylab = "Bootstrap ratios"
-  ) + ggtitle(paste0("Component ", dim), subtitle = "Brain Networks (RSFC)")
+  ) + ggtitle(paste0("Component ", dim), subtitle = "Socioenvironment Variables")
   
   print(plot_BRI)
   dev.off() # Close the PNG device for BR.I
   
-  # Save the plot for BR.J (Sociocultural - Table 2)  
+  # Save the plot for BR.J (Depression - Table 2)  
   png(file.path(fig_dir, paste0("Bootstrap_Ratio_BRJ_Dim", dim, ".png")), 
       width = 2000, height = 1200, res = 200)
   
@@ -410,7 +470,7 @@ for (dim in dimensions_to_plot) {
     threshold = 3,
     font.size = 4,
     ylab = "Bootstrap ratios"
-  ) + ggtitle(paste0("Component ", dim), subtitle = "Sociocultural Variables")
+  ) + ggtitle(paste0("Component ", dim), subtitle = "Depression Variables")
   
   print(plot_BRJ)
   dev.off() # Close the PNG device for BR.J
@@ -455,9 +515,9 @@ pctContrib.BR.I <- ssq.BR.I / sum(ssq.BR.I) * 100
 pctContrib.BR.J <- ssq.BR.J / sum(ssq.BR.J) * 100
 
 print("Bootstrap Ratio Contribution (Variable Stability):")
-print("Block I (Brain):")
+print("Block I (Socioenvironment):")
 print(round(pctContrib.BR.I, 2))
-print("Block J (Sociocultural):")
+print("Block J (Depression):")
 print(round(pctContrib.BR.J, 2))
 
 # Key results for first component
