@@ -393,22 +393,22 @@ socioenv_res <- cbind.data.frame(socioenv_loadings, socioenv_bootstrap)
 depression_res <- cbind.data.frame(depression_loadings, depression_bootstrap)
 
 write.csv(socioenv_res, paste(out_dir,
-  "rni-sociocult_Q-components.csv",
+  "plsc_socioenv_loadings_bootstrap.csv",
   sep = "/"
 ), row.names = TRUE)
 
 write.csv(depression_res, paste(out_dir,
-  "rni-depression_P-components.csv",
+  "plsc_depression_loadings_bootstrap.csv",
   sep = "/"
 ), row.names = TRUE)
 
 write.csv(pls.res$TExPosition.Data$lx, paste(out_dir,
-  "rniXrsfc_lx-base.csv",
+  "plsc_LV_scores_socioenv.csv",
   sep = "/"
 ), row.names = TRUE)
 
 write.csv(pls.res$TExPosition.Data$ly, paste(out_dir,
-  "rniXrsfc_ly-base.csv",
+  "plsc_LV_scores_depression.csv",
   sep = "/"
 ), row.names = TRUE)
 
